@@ -1,0 +1,35 @@
+# Copyright 2025 Jelly Terra <jellyterra@proton.me>
+# Use of this source code form is governed under the MIT license.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build
+        shell: bash
+        run: |
+          sudo npm install -g @vscode/vsce
+          npm install
+          vsce package
+          sha256sum *vsix > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run:
+          gh release -R ${{ github.repository }} create -F README.md ${{ github.ref_name }} -t ${{ github.ref_name }} SHA256SUMS.txt *vsix
