@@ -3,6 +3,7 @@
 
 import { readFileSync } from 'fs';
 import * as vscode from 'vscode';
+import * as JSONC from 'jsonc-parser';
 
 export function activate(context: vscode.ExtensionContext) {
 	const getConf = () => vscode.workspace.getConfiguration("copyright");
@@ -75,7 +76,7 @@ function getLanguageConfiguration(languageId: string) {
 
 	const [ext, lang] = found[0];
 
-	return JSON.parse(readFileSync(`${ext.extensionPath}/${lang.configuration}`).toString());
+	return JSONC.parse(readFileSync(`${ext.extensionPath}/${lang.configuration}`).toString());
 }
 
 function updateCopyright(document: vscode.TextDocument, text: string): vscode.WorkspaceEdit {
