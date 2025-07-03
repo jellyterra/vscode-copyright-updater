@@ -1,0 +1,12 @@
+{
+	"ignoreListFiles": [
+		".gitignore",
+		".vscodeignore"
+	],
+	"scopes": [
+		{
+			"pattern": "^src/*.ts",
+			"template": ".vscode/copyright.js"
+		}
+	]
+}

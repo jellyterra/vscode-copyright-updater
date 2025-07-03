@@ -11,6 +11,36 @@
   - If the comment block does not exist, insert.
   - If same, do nothing.
 
+## Project configuration
+
+### Unified template
+
+The extension will evaluate text from `.vscode/copyright.js` script.
+
+### Scope-divided template
+
+The extension will follow the properties defined in `.vscode/copyright.json` configuration.
+
+#### Example:
+
+```json
+{
+  "ignoreListFiles": [".gitignore"],
+  "scopes": [
+    {
+        "pattern": "^src/.*.scala",
+        "template": ".vscode/copyright-scala.js"
+    },
+    {
+        "pattern": "^src/.*.java",
+        "template": ".vscode/copyright-java.js"
+    }
+  ]
+}
+```
+
+And save the template to the corresponding location.
+
 ## Template
 
 Template is a JavaScript snippet.
@@ -34,6 +64,12 @@ Use of this source code form is governed under the MIT license.
 ID: `copyright-updater.updateEditor`
 
 It triggers an update for document in the active editor.
+
+### Update for all project files
+
+ID: `copyright-updater.updateProjectFiles`
+
+It triggers an update for all file scopes defined in the project configuration.
 
 ## Configuration
 

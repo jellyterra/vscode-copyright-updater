@@ -1,66 +1,78 @@
 // Copyright 2025 Jelly Terra <jellyterra@proton.me>
 // Use of this source code form is governed under the MIT license.
 
-import { readFileSync } from 'fs';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import * as vscode from 'vscode';
 import * as JSONC from 'jsonc-parser';
 
-export function activate(context: vscode.ExtensionContext) {
-	const getConf = () => vscode.workspace.getConfiguration("copyright");
-	const evalTemplate = () => evalFile(`${vscode.workspace.workspaceFolders?.[0].uri.path}/${getConf().get<string>("projectScriptPath")}`);
-	const getIgnoreList = () => JSON.parse(getConf().get<string>("ignoreList")!!);
-
-	context.subscriptions.push(vscode.commands.registerCommand('copyright-updater.updateEditor', () => {
-		const editor = vscode.window.activeTextEditor;
-		if (!editor) {
-			vscode.window.showErrorMessage("No active editor found.");
-			return;
-		}
-
-		if (isIgnored(getIgnoreList(), editor.document.uri)) {
-			vscode.window.showInformationMessage('Ignored path. Nothing to do.');
-			return;
-		}
-
-		vscode.workspace.applyEdit(updateCopyright(editor.document, <string>evalTemplate()));
-
-		vscode.window.showInformationMessage('Copyright has been updated for the active editor.');
-	}));
-
-	context.subscriptions.push(vscode.workspace.onWillSaveTextDocument(event => {
-		if (!getConf().get<boolean>("updateOnSave") || isIgnored(getIgnoreList(), event.document.uri)) {
-			return;
-		}
-
-		const edit = updateCopyright(event.document, evalTemplate());
-		if (edit.size === 0) {
-			return;
-		}
-		vscode.workspace.applyEdit(edit);
-
-		vscode.window.showInformationMessage('Copyright has been updated for saved file.');
-	}));
+class Scope {
+	pattern = "";
+	template = "";
 }
 
-export function deactivate() {
-	vscode.window.showInformationMessage("Copyright updater has been deactivated.");
+class Config {
+	scopes: Scope[] = [];
+
+	ignoreListFiles: string[] = [];
 }
 
-function evalFile(path: string) {
-	return eval(readFileSync(path).toString());
-}
-
-function getRelativePath(uri: vscode.Uri) {
-	return uri.fsPath.slice(vscode.workspace.workspaceFolders?.[0].uri.fsPath.length!! + 1); // +1 for "/" at the ending
-}
-
-function isIgnored(ignoreList: string[], uri: vscode.Uri): boolean {
-	for (const rule of ignoreList) {
-		if (getRelativePath(uri).match(rule)?.length === 1) {
+function isMatched(regexList: string[], s: string): boolean {
+	for (const rule of regexList) {
+		if (s.match(rule)?.length === 1) {
 			return true;
 		}
 	}
 	return false;
+}
+
+function getExtensionConfig() {
+	return vscode.workspace.getConfiguration("copyright");
+}
+
+function getWorkspaceRoot() {
+	return vscode.workspace.workspaceFolders![0].uri.path;
+}
+
+function getRelativePath(uri: string) {
+	return uri.slice(getWorkspaceRoot().length + 1); // +1 for "/" at the ending
+}
+
+function getProjectConfig() {
+	const path = `${getWorkspaceRoot()}/.vscode/copyright.json`;
+	return existsSync(path) ? <Config>JSONC.parse(readFileSync(path).toString()) : null;
+}
+
+function getIgnoreListFromFile(path: string): string[] {
+	const ignoreList: string[] = [];
+
+	for (const line of readFileSync(path).toString().split("\n")) {
+		if (line.length === 0 || line.startsWith("#")) {
+			continue;
+		}
+		const regex = "^" + line;
+
+		try {
+			"".match(regex);
+			ignoreList.push(regex);
+		} catch {
+			// Ignore.
+		}
+	}
+
+	return ignoreList;
+}
+
+function getIgnoreList(): string[] {
+	const ignoreList = JSON.parse(getExtensionConfig().get<string>("ignoreList")!);
+
+	const ignoreListFiles = getProjectConfig()?.ignoreListFiles;
+	if (ignoreListFiles) {
+		for (const path of ignoreListFiles) {
+			ignoreList.push(...getIgnoreListFromFile(`${getWorkspaceRoot()}/${path}`));
+		}
+	}
+
+	return ignoreList;
 }
 
 function getLanguageConfiguration(languageId: string) {
@@ -71,7 +83,7 @@ function getLanguageConfiguration(languageId: string) {
 		.map(([ext, langs]) => [ext, langs[0]]);
 
 	if (found.length === 0) {
-		throw Error(`Missing extension or language configuration: ${languageId}`);
+		return null;
 	}
 
 	const [ext, lang] = found[0];
@@ -79,15 +91,36 @@ function getLanguageConfiguration(languageId: string) {
 	return JSONC.parse(readFileSync(`${ext.extensionPath}/${lang.configuration}`).toString());
 }
 
-function updateCopyright(document: vscode.TextDocument, text: string): vscode.WorkspaceEdit {
-	const langConf = getLanguageConfiguration(document.languageId);
+function evalFile(path: string) {
+	return eval(readFileSync(path).toString());
+}
 
-	const edit = new vscode.WorkspaceEdit();
+function evalTemplate(uri: vscode.Uri) {
+	const config = getProjectConfig();
+	if (!config) {
+		return evalFile(`${getWorkspaceRoot()}/.vscode/copyright.js`);
+	}
+
+	const relativePath = getRelativePath(uri.path);
+	for (const scope of config.scopes) {
+		if (relativePath.match(scope.pattern)) {
+			return evalFile(`${getWorkspaceRoot()}/${scope.template}`);
+		}
+	}
+
+	// Does not belong to any scope.
+	return null;
+}
+
+function updateCopyright(document: vscode.TextDocument, text: string): vscode.WorkspaceEdit | null {
+	const langConf = getLanguageConfiguration(document.languageId);
+	if (!langConf) {
+		return null;
+	}
 
 	const prefix = langConf.comments.lineComment;
-
 	if (!prefix) {
-		return edit;
+		return null;
 	}
 
 	document.getText();
@@ -114,10 +147,117 @@ function updateCopyright(document: vscode.TextDocument, text: string): vscode.Wo
 
 	const range = new vscode.Range(start, end);
 
-	if (document.getText(range) !== con) {
-		edit.delete(document.uri, range);
-		edit.insert(document.uri, start, con);
+	if (document.getText(range) === con) {
+		return null;
 	}
 
+	const edit = new vscode.WorkspaceEdit();
+	edit.delete(document.uri, range);
+	edit.insert(document.uri, start, con);
+
 	return edit;
+}
+
+function walkFiles(dir: string, patterns: string[] = []): string[] {
+	const ignoreList = getIgnoreList();
+
+	const files: string[] = [];
+
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		const path = `${entry.parentPath}/${entry.name}`;
+		const relativePath = getRelativePath(path);
+
+		if (isMatched(ignoreList, relativePath)) {
+			continue;
+		}
+
+		if (entry.isFile() && isMatched(patterns, relativePath)) {
+			files.push(path);
+		}
+
+		if (entry.isDirectory()) {
+			files.push(...walkFiles(path, patterns));
+		}
+	}
+
+	return files;
+}
+
+export function activate(context: vscode.ExtensionContext) {
+	context.subscriptions.push(vscode.commands.registerCommand('copyright-updater.updateEditor', () => {
+		const editor = vscode.window.activeTextEditor;
+		if (!editor) {
+			vscode.window.showErrorMessage("No active editor found.");
+			return;
+		}
+
+		const uri = editor.document.uri;
+
+		if (isMatched(getIgnoreList(), getRelativePath(uri.path))) {
+			vscode.window.showInformationMessage('Ignored path. Nothing to do.');
+			return;
+		}
+
+		const text = evalTemplate(uri);
+		if (!text) {
+			vscode.window.showInformationMessage("Path of file in the active editor does not belong to any scope. Nothing to do.");
+			return;
+		}
+
+		const edit = updateCopyright(editor.document, text);
+		if (!edit) {
+			return;
+		}
+		vscode.workspace.applyEdit(edit);
+
+		vscode.window.showInformationMessage('Copyright has been updated for the active editor.');
+	}));
+
+	context.subscriptions.push(vscode.commands.registerCommand('copyright-updater.updateProjectFiles', () => {
+		const config = getProjectConfig();
+		if (!config) {
+			vscode.window.showErrorMessage("Missing project configuration file for file scope.");
+			return;
+		}
+
+		for (const path of walkFiles(getWorkspaceRoot(), config.scopes.map(it => it.pattern))) {
+			vscode.workspace.openTextDocument(vscode.Uri.parse("file://" + path)).then(document => {
+				const relativePath = getRelativePath(path);
+
+				const edit = updateCopyright(document, evalFile(`${getWorkspaceRoot()}/${config.scopes.find(scope => relativePath.match(scope.pattern))!.template}`));
+				if (!edit) {
+					return;
+				}
+				vscode.workspace.applyEdit(edit);
+
+				vscode.window.showInformationMessage(`Copyright has been updated: ${relativePath}`);
+			});
+		}
+
+		vscode.window.showInformationMessage(`Updated copyright for all project files.`);
+	}));
+
+	context.subscriptions.push(vscode.workspace.onWillSaveTextDocument(event => {
+		const uri = event.document.uri;
+		if (!getExtensionConfig().get<boolean>("updateOnSave") || isMatched(getIgnoreList(), getRelativePath(uri.path))) {
+			return;
+		}
+
+		const template = evalTemplate(uri);
+		if (!template) {
+			return;
+		}
+
+		const edit = updateCopyright(event.document, template);
+		if (!edit) {
+			return;
+		}
+		vscode.workspace.applyEdit(edit);
+
+		vscode.window.showInformationMessage('Copyright has been updated for saved file.');
+	}));
+}
+
+export function deactivate() {
+	vscode.window.showInformationMessage("Copyright updater has been deactivated.");
 }
