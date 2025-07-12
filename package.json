@@ -5,7 +5,7 @@
   "description": "Update copyright.",
   "repository": "https://github.com/jellyterra/vscode-copyright-updater",
   "icon": "images/logo.png",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "engines": {
     "vscode": "^1.101.0"
   },
@@ -13,7 +13,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onEditSession:file"
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {

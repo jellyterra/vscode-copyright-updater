@@ -256,6 +256,47 @@ export function activate(context: vscode.ExtensionContext) {
 
 		vscode.window.showInformationMessage('Copyright has been updated for saved file.');
 	}));
+
+	const settingsUri = vscode.Uri.parse(`file://${getWorkspaceRoot()}/.vscode/copyright.json`);
+
+	if (existsSync(`${getWorkspaceRoot()}/.vscode/copyright.json`)) {
+		if (getExtensionConfig().get<boolean>("updateOnSave")) {
+			vscode.window.showInformationMessage("Copyright settings detected.", "View", "Ignore").then(ans => {
+				if (ans === "View") {
+					vscode.workspace.openTextDocument(settingsUri).then(document => vscode.window.showTextDocument(document));
+				}
+			});
+		} else {
+			const ask = () => vscode.window.showInformationMessage("Copyright settings detected. Update on save?", "Enable", "View", "Ignore").then(ans => {
+				switch (ans) {
+					case "Enable":
+						getExtensionConfig().update("updateOnSave", true);
+					case "View":
+						vscode.workspace.openTextDocument(settingsUri).then(document => vscode.window.showTextDocument(document));
+						ask();
+				}
+			});
+			ask();
+		}
+	} else if (existsSync(`${getWorkspaceRoot()}/.vscode/copyright.js`)) {
+		vscode.window.showInformationMessage("Simple copyright template detected. Please trigger copyright update by the command manually.", "View", "Ignore").then(ans => {
+			if (ans === "View") {
+				vscode.workspace.openTextDocument(vscode.Uri.parse(`${getWorkspaceRoot()}/.vscode/copyright.js`)).then(document => vscode.window.showTextDocument(document));
+			}
+		});
+	} else {
+		vscode.window.showInformationMessage("No copyright settings detected. Create one?", "Yes", "No").then(ans => {
+			if (ans === "Yes") {
+				vscode.workspace.fs.writeFile(settingsUri, new TextEncoder().encode(JSON.stringify({
+					scopes: [{
+						pattern: "^",
+						template: ".vscode/",
+					}]
+				})));
+				setTimeout(() => vscode.workspace.openTextDocument(settingsUri).then(document => vscode.window.showTextDocument(document)), 500);
+			}
+		});
+	}
 }
 
 export function deactivate() {
